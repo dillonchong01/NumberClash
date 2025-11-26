@@ -4,6 +4,7 @@ import random
 import time
 
 app = Flask(__name__)
+app.config['DEBUG'] = True
 
 # Use gevent for async mode, compatible with Vercel
 socketio = SocketIO(app, async_mode='gevent')
