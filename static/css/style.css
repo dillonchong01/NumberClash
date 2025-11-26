@@ -1,0 +1,19 @@
+body {
+    font-family: Arial, sans-serif;
+}
+
+#game-play {
+    margin-top: 20px;
+}
+
+button {
+    margin: 5px;
+    padding: 10px;
+}
+
+#number-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    max-height: 300px;
+    overflow-y: auto;
+}
