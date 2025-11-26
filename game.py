@@ -1,0 +1,320 @@
+from flask import Flask, render_template, request, jsonify
+from flask_sock import Sock
+import json
+import random
+import threading
+import time
+
+app = Flask(__name__)
+sock = Sock(app)
+
+rooms = {}
+clients = {}  # ws -> (room_code, player_id)
+round_timers = {}  # room_code -> timer thread
+
+
+def create_room(num_players, num_rounds):
+    room_code = str(random.randint(1000, 9999))
+    # Ensure unique room code
+    while room_code in rooms:
+        room_code = str(random.randint(1000, 9999))
+    
+    rooms[room_code] = {
+        "players": [],
+        "num_players": num_players,
+        "num_rounds": num_rounds,
+        "current_round": 1,
+        "scores": {},
+        "player_numbers": {},
+        "current_round_choices": {},
+        "game_started": False,
+        "round_in_progress": False,
+        "used_numbers": {}  # player_id -> set of used numbers
+    }
+    return room_code
+
+
+def determine_winner(player_choices):
+    if not player_choices:
+        return [], 0
+    highest = max(player_choices.values())
+    winners = [pid for pid, choice in player_choices.items() if choice == highest]
+    return winners, highest
+
+
+def start_round_timer(room_code):
+    """Start a 15-second timer for the current round"""
+    def timer_expired():
+        time.sleep(15)
+        
+        if room_code not in rooms:
+            return
+            
+        room = rooms[room_code]
+        
+        # Check if round is still in progress
+        if not room.get("round_in_progress", False):
+            return
+            
+        # Process round with current choices (even if not all players submitted)
+        process_round_end(room_code)
+    
+    # Cancel existing timer if any
+    if room_code in round_timers:
+        round_timers[room_code].cancel()
+    
+    # Start new timer
+    timer = threading.Timer(15.0, timer_expired)
+    timer.daemon = True
+    timer.start()
+    round_timers[room_code] = timer
+
+
+def process_round_end(room_code):
+    """Process the end of a round"""
+    if room_code not in rooms:
+        return
+        
+    room = rooms[room_code]
+    
+    # Mark round as no longer in progress
+    room["round_in_progress"] = False
+    
+    # Cancel timer
+    if room_code in round_timers:
+        round_timers[room_code].cancel()
+        del round_timers[room_code]
+    
+    choices = room["current_round_choices"]
+    
+    # For players who didn't submit, assign 0
+    for player in room["players"]:
+        pid = player["id"]
+        if pid not in choices:
+            choices[pid] = 0
+    
+    winners, highest = determine_winner(choices)
+    
+    # Update scores
+    for w in winners:
+        room["scores"][w] += 1
+    
+    # Store choices in history
+    for pid, choice in choices.items():
+        room["player_numbers"][pid].append(choice)
+    
+    # Prepare round result with player names
+    player_choices_display = {}
+    for pid, choice in choices.items():
+        player_name = room["players"][pid]["name"]
+        player_choices_display[player_name] = choice
+    
+    winner_names = [room["players"][w]["name"] for w in winners]
+    
+    # Broadcast round results
+    broadcast(room_code, {
+        "type": "round_result",
+        "winners": winner_names,
+        "highest": highest,
+        "scores": room["scores"],
+        "player_choices": player_choices_display,
+        "current_round": room["current_round"]
+    })
+    
+    # Check if game is over
+    if room["current_round"] >= room["num_rounds"]:
+        # Game over
+        max_score = max(room["scores"].values()) if room["scores"] else 0
+        final_winners = [
+            room["players"][pid]["name"] 
+            for pid, score in room["scores"].items() 
+            if score == max_score
+        ]
+        
+        broadcast(room_code, {
+            "type": "game_over",
+            "winners": final_winners,
+            "final_scores": room["scores"],
+            "players": room["players"]
+        })
+    else:
+        # Schedule next round after 5 seconds
+        def start_next_round():
+            time.sleep(5)
+            if room_code not in rooms:
+                return
+                
+            room["current_round"] += 1
+            room["current_round_choices"] = {}
+            room["round_in_progress"] = True
+            
+            # Broadcast new round started
+            broadcast(room_code, {
+                "type": "next_round",
+                "current_round": room["current_round"]
+            })
+            
+            # Start timer for new round
+            start_round_timer(room_code)
+        
+        timer = threading.Timer(5.0, start_next_round)
+        timer.daemon = True
+        timer.start()
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/room/<room_code>")
+def game_room(room_code):
+    if room_code not in rooms:
+        return "Room not found", 404
+    return render_template("game_room.html", room_code=room_code)
+
+
+@app.route("/create_room", methods=["POST"])
+def create_new_room():
+    num_players = int(request.form["num_players"])
+    num_rounds = int(request.form["num_rounds"])
+    room_code = create_room(num_players, num_rounds)
+    return jsonify({"room_code": room_code})
+
+
+@app.route("/join_room", methods=["POST"])
+def join_existing_room():
+    room_code = request.form["room_code"]
+    player_name = request.form["player_name"]
+
+    # Check if room exists
+    if room_code not in rooms:
+        return jsonify({"status": "error", "message": "Room not found"})
+    
+    room = rooms[room_code]
+    
+    # Check if room is full
+    if len(room["players"]) >= room["num_players"]:
+        return jsonify({"status": "error", "message": "Room is full"})
+    
+    # Add player
+    player_id = len(room["players"])
+    room["players"].append({"id": player_id, "name": player_name})
+    room["scores"][player_id] = 0
+    room["player_numbers"][player_id] = []
+    room["used_numbers"][player_id] = set()  # Initialize empty set for used numbers
+    
+    # Check if room is now full and start game
+    if len(room["players"]) == room["num_players"]:
+        room["game_started"] = True
+        room["round_in_progress"] = True
+        # Start the timer for round 1
+        start_round_timer(room_code)
+    
+    return jsonify({
+        "status": "joined",
+        "player_id": player_id,
+        "room_code": room_code
+    })
+
+
+@sock.route("/ws")
+def ws(ws):
+    print("WebSocket connected")
+    room_code = None
+    player_id = None
+
+    try:
+        while True:
+            data = ws.receive()
+            if data is None:
+                print("WebSocket disconnected")
+                break
+
+            msg = json.loads(data)
+
+            if msg["type"] == "join":
+                room_code = msg["room_code"]
+                player_id = msg["player_id"]
+                clients[ws] = (room_code, player_id)
+
+                # Send initial game state
+                room = rooms[room_code]
+                safe_room = dict(room)
+                safe_room["used_numbers"] = {
+                    pid: list(nums) for pid, nums in room["used_numbers"].items()
+                }
+
+                ws.send(json.dumps({
+                    "type": "game_state",
+                    "state": safe_room,
+                    "used_numbers": safe_room["used_numbers"].get(player_id, [])
+                }))
+                                
+                # Broadcast updated player list to all players
+                broadcast(room_code, {
+                    "type": "player_update",
+                    "players": room["players"],
+                    "scores": room["scores"],
+                    "game_started": room["game_started"]
+                })
+
+            elif msg["type"] == "move":
+                if ws not in clients:
+                    continue
+                    
+                room_code, player_id = clients[ws]
+                room = rooms[room_code]
+                
+                # Check if game has started
+                if not room.get("game_started", False):
+                    continue
+                
+                # Check if round is in progress
+                if not room.get("round_in_progress", False):
+                    continue
+                
+                number = msg["number"]
+
+                # Store the choice for this round (only if not already submitted)
+                if player_id not in room["current_round_choices"]:
+                    # Check if number was already used by this player
+                    if number in room["used_numbers"].get(player_id, set()):
+                        # Number already used, ignore this move
+                        continue
+                    
+                    room["current_round_choices"][player_id] = number
+                    room["used_numbers"][player_id].add(number)  # Mark as used
+
+                    # Check if all players have made their choice
+                    num_choices = len(room["current_round_choices"])
+                    num_players = len(room["players"])
+                    
+                    if num_choices == num_players:
+                        # All players have chosen, process immediately
+                        process_round_end(room_code)
+
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        if ws in clients:
+            clients.pop(ws, None)
+
+
+def broadcast(room_code, message):
+    dead = []
+    for client_ws, (r, _) in list(clients.items()):
+        if r == room_code:
+            try:
+                client_ws.send(json.dumps(message))
+            except Exception as e:
+                print(f"Broadcast error: {e}")
+                dead.append(client_ws)
+
+    for client_ws in dead:
+        clients.pop(client_ws, None)
+
+
+if __name__ == "__main__":
+    print("Starting Flask-Sock server...")
+    app.run(host="127.0.0.1", port=5000, debug=True)
