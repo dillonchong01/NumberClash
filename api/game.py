@@ -2,15 +2,8 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, join_room, leave_room, emit
 import random
 import time
-import logging
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['DEBUG'] = True
-
-# Use gevent for async mode, compatible with Vercel
 socketio = SocketIO(app, async_mode='gevent')
 
 # Store game rooms in memory
@@ -38,7 +31,6 @@ def determine_winner(player_choices):
 
 @app.route('/')
 def index():
-    logger.debug("Serving the homepage!")
     return render_template('index.html')
 
 # Create room endpoint
