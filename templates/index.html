@@ -3,58 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Lobby</title>
+    <title>Highest Number Game</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <h1>Welcome to the Highest Number Game</h1>
-        <p class="subtitle">Pick a number - highest wins the round!</p>
-
-        <div id="create-room" class="card">
-            <h2>Create a Room</h2>
-            <form id="create-room-form">
-                <div class="form-group">
-                    <label for="num_players">Number of Players (2-4):</label>
-                    <input id="num_players" type="number" min="2" max="4" value="2" required>
-                </div>
-                <div class="form-group">
-                    <label for="num_rounds">Number of Rounds (5-50):</label>
-                    <input id="num_rounds" type="number" min="5" max="50" value="10" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Create Room</button>
-            </form>
-        </div>
-
-        <div id="join-room" class="card">
-            <h2>Join a Room</h2>
-            <form id="join-room-form">
-                <div class="form-group">
-                    <label for="room_code">Room Code:</label>
-                    <input id="room_code" type="text" placeholder="Enter 4-digit code" maxlength="4" required>
-                </div>
-                <div class="form-group">
-                    <label for="player_name">Your Name:</label>
-                    <input id="player_name" type="text" placeholder="Enter your name" maxlength="20" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Join Room</button>
-            </form>
-        </div>
-
-        <div id="game-ui" style="display:none;">
-            <div class="game-header">
-                <h2>Round <span id="current-round">1</span> of <span id="total-rounds">10</span></h2>
+    <!-- Lobby -->
+    <div id="lobby">
+        <div class="lobby-container">
+            <div class="logo">
+                <h1>🎯 Number War</h1>
+                <p>Pick the highest number to win!</p>
             </div>
-            
-            <div id="players-list" class="players-container">
-                <!-- Players will be populated by JavaScript -->
+
+            <div class="tab-buttons">
+                <button id="btn-create" class="tab-btn active" onclick="showCreateRoom()">Create Room</button>
+                <button id="btn-join" class="tab-btn" onclick="showJoinRoom()">Join Room</button>
+            </div>
+
+            <div id="create-room">
+                <form id="create-room-form">
+                    <div class="form-group">
+                        <label for="creator_name">Your Name</label>
+                        <input id="creator_name" type="text" placeholder="Enter your name" maxlength="20" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="num_players">Number of Players</label>
+                        <input id="num_players" type="number" min="2" max="4" value="2" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="num_rounds">Number of Rounds</label>
+                        <input id="num_rounds" type="number" min="5" max="50" value="10" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Room</button>
+                </form>
+            </div>
+
+            <div id="join-room" style="display:none;">
+                <form id="join-room-form">
+                    <div class="form-group">
+                        <label for="room_code">Room Code</label>
+                        <input id="room_code" type="text" placeholder="Enter 4-digit code" maxlength="4" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="player_name">Your Name</label>
+                        <input id="player_name" type="text" placeholder="Enter your name" maxlength="20" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Join Room</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game UI -->
+    <div id="game-ui" style="display:none;">
+        <div class="container">
+            <div class="game-header">
+                <div class="room-info">
+                    <div class="room-code">
+                        <span class="room-code-label">Room Code:</span>
+                        <span class="room-code-value" id="room-code-display">----</span>
+                    </div>
+                    <div class="round-info">
+                        <h2>Round <span id="current-round">1</span> / <span id="total-rounds">10</span></h2>
+                    </div>
+                </div>
+                <div class="timer-container">
+                    <div class="timer-bar-bg">
+                        <div id="timer-bar" style="width: 100%;"></div>
+                    </div>
+                    <div id="timer-text">15s</div>
+                </div>
+            </div>
+
+            <div class="players-section">
+                <h3>Players</h3>
+                <div id="players-list">
+                    <!-- Players populated by JavaScript -->
+                </div>
             </div>
 
             <div class="game-area">
-                <h3>Choose Your Number:</h3>
+                <h3>Choose Your Number</h3>
                 <div id="number-buttons"></div>
-                <div id="waiting-message" style="display:none;"></div>
-                <div id="round-results" style="display:none;"></div>
             </div>
         </div>
     </div>

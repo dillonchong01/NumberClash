@@ -7,6 +7,7 @@ let gameStarted = false;
 let roundTimer = null;
 let timeRemaining = 15;
 let usedNumbers = [];  // Track which numbers this player has already used
+let maxNumber = 10;  // Max number available (will be set to num_rounds)
 
 /* Create Room */
 const createForm = document.getElementById("create-room-form");
@@ -16,6 +17,7 @@ if (createForm) {
 
         const numPlayers = document.getElementById("num_players").value;
         const numRounds = document.getElementById("num_rounds").value;
+        const playerName = document.getElementById("creator_name").value;
 
         fetch("/create_room", {
             method: "POST",
@@ -24,12 +26,42 @@ if (createForm) {
             },
             body: new URLSearchParams({
                 num_players: numPlayers,
-                num_rounds: numRounds
+                num_rounds: numRounds,
+                player_name: playerName
             })
         })
         .then(r => r.json())
         .then(d => {
-            alert("Room Code: " + d.room_code + "\n\nShare this code with other players to start the game!");
+            roomCode = d.room_code;
+            playerId = d.player_id;
+
+            // Hide lobby, show game UI
+            document.getElementById("lobby").style.display = "none";
+            document.getElementById("game-ui").style.display = "block";
+            
+            // Display room code at top
+            document.getElementById("room-code-display").textContent = roomCode;
+
+            // Connect WebSocket
+            const protocol = location.protocol === "https:" ? "wss" : "ws";
+            ws = new WebSocket(`${protocol}://${location.host}/ws`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    type: "join",
+                    room_code: roomCode,
+                    player_id: playerId
+                }));
+            };
+
+            ws.onmessage = e => {
+                const msg = JSON.parse(e.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                showNotification("Connection lost!", "error");
+            };
         });
     });
 }
@@ -64,7 +96,7 @@ if (joinForm) {
         })
         .then(d => {
             if (d.status !== "joined") {
-                alert(d.message || "Failed to join room.");
+                showNotification(d.message || "Failed to join room.", "error");
                 return;
             }
 
@@ -72,9 +104,11 @@ if (joinForm) {
             playerId = d.player_id;
 
             // Hide lobby, show game UI
-            document.getElementById("create-room").style.display = "none";
-            document.getElementById("join-room").style.display = "none";
+            document.getElementById("lobby").style.display = "none";
             document.getElementById("game-ui").style.display = "block";
+            
+            // Display room code at top
+            document.getElementById("room-code-display").textContent = roomCode;
 
             // Connect WebSocket
             const protocol = location.protocol === "https:" ? "wss" : "ws";
@@ -94,13 +128,28 @@ if (joinForm) {
             };
 
             ws.onclose = () => {
-                alert("Connection lost!");
+                showNotification("Connection lost!", "error");
             };
         })
         .catch(err => {
-            alert("Error joining room: " + err.message);
+            showNotification("Error joining room: " + err.message, "error");
         });
     });
+}
+
+/* Toggle between Create and Join */
+function showCreateRoom() {
+    document.getElementById("create-room").style.display = "block";
+    document.getElementById("join-room").style.display = "none";
+    document.getElementById("btn-create").classList.add("active");
+    document.getElementById("btn-join").classList.remove("active");
+}
+
+function showJoinRoom() {
+    document.getElementById("create-room").style.display = "none";
+    document.getElementById("join-room").style.display = "block";
+    document.getElementById("btn-create").classList.remove("active");
+    document.getElementById("btn-join").classList.add("active");
 }
 
 
@@ -109,6 +158,7 @@ function handleMessage(msg) {
         currentRound = msg.state.current_round;
         gameStarted = msg.state.game_started;
         usedNumbers = msg.used_numbers || [];
+        maxNumber = msg.state.num_rounds;  // Set max number to num_rounds
         
         document.getElementById("current-round").textContent = currentRound;
         document.getElementById("total-rounds").textContent = msg.state.num_rounds;
@@ -116,7 +166,7 @@ function handleMessage(msg) {
         updatePlayerList(msg.state.players, msg.state.scores);
         
         if (gameStarted) {
-            createNumberButtons(10);
+            createNumberButtons(maxNumber);
             startRoundTimer();
         } else {
             showWaitingForPlayers(msg.state.players.length, msg.state.num_players);
@@ -126,24 +176,31 @@ function handleMessage(msg) {
     }
 
     if (msg.type === "player_update") {
+        // Update maxNumber if we have num_rounds info
+        if (msg.num_rounds) {
+            maxNumber = msg.num_rounds;
+        }
+        
         updatePlayerList(msg.players, msg.scores);
         
         if (msg.game_started && !gameStarted) {
             gameStarted = true;
-            createNumberButtons(10);
+            createNumberButtons(maxNumber);
             startRoundTimer();
             hideWaitingForPlayers();
         } else if (!msg.game_started) {
-            const numPlayers = msg.players.length;
-            const totalSlots = Object.keys(msg.scores).length > 0 ? 
-                Math.max(...Object.keys(msg.scores).map(Number)) + 1 : numPlayers;
-            showWaitingForPlayers(numPlayers, totalSlots);
+            showWaitingForPlayers(msg.players.length, msg.num_players);
         }
     }
     
     if (msg.type === "used_numbers_update") {
         usedNumbers = msg.used_numbers || [];
-        createNumberButtons(10);
+        createNumberButtons(maxNumber);
+    }
+    
+    if (msg.type === "auto_picked") {
+        usedNumbers.push(msg.number);
+        showNotification(`Time's up! Number ${msg.number} was auto-selected for you.`, "warning");
     }
 
     if (msg.type === "round_result") {
@@ -174,8 +231,8 @@ function handleMessage(msg) {
         }
         
         // Re-enable number buttons for new round (used numbers will stay disabled)
-        createNumberButtons(10);
-        document.getElementById("number-buttons").style.display = "flex";
+        createNumberButtons(maxNumber);
+        document.getElementById("number-buttons").style.display = "grid";
         
         // Start new timer
         startRoundTimer();
@@ -209,30 +266,23 @@ function stopRoundTimer() {
         clearInterval(roundTimer);
         roundTimer = null;
     }
-    const timerDiv = document.getElementById("round-timer");
-    if (timerDiv) {
-        timerDiv.textContent = "";
-    }
 }
 
 
 function updateTimerDisplay() {
-    let timerDiv = document.getElementById("round-timer");
-    if (!timerDiv) {
-        timerDiv = document.createElement("div");
-        timerDiv.id = "round-timer";
-        timerDiv.className = "timer-display";
-        document.querySelector(".game-header").appendChild(timerDiv);
-    }
+    const timerBar = document.getElementById("timer-bar");
+    const timerText = document.getElementById("timer-text");
     
-    timerDiv.textContent = `Time remaining: ${timeRemaining}s`;
-    
-    if (timeRemaining <= 5) {
-        timerDiv.style.color = "#dc3545";
-        timerDiv.style.fontWeight = "bold";
-    } else {
-        timerDiv.style.color = "#667eea";
-        timerDiv.style.fontWeight = "normal";
+    if (timerBar && timerText) {
+        const percentage = (timeRemaining / 15) * 100;
+        timerBar.style.width = percentage + "%";
+        timerText.textContent = `${timeRemaining}s`;
+        
+        if (timeRemaining <= 5) {
+            timerBar.style.backgroundColor = "#ef4444";
+        } else {
+            timerBar.style.backgroundColor = "#8b5cf6";
+        }
     }
 }
 
@@ -253,9 +303,12 @@ function showWaitingForPlayers(current, total) {
     }
     
     waitingDiv.innerHTML = `
+        <div class="waiting-icon">⏳</div>
         <h3>${current}/${total} Players</h3>
         <p>Waiting for players to join...</p>
-        <p>The game will start automatically when all players join!</p>
+        <div class="loading-dots">
+            <span></span><span></span><span></span>
+        </div>
     `;
     waitingDiv.style.display = "block";
 }
@@ -271,15 +324,24 @@ function hideWaitingForPlayers() {
 
 function updatePlayerList(players, scores) {
     const container = document.getElementById("players-list");
-    container.innerHTML = "<h3>Players:</h3>";
+    container.innerHTML = "";
     
-    players.forEach(player => {
+    players.forEach((player, index) => {
         const playerDiv = document.createElement("div");
-        playerDiv.className = "player-item";
+        playerDiv.className = "player-card";
+        if (player.id === playerId) {
+            playerDiv.classList.add("current-player");
+        }
         const score = scores[player.id] || 0;
         playerDiv.innerHTML = `
-            <span class="player-name">${player.name}${player.id === playerId ? " (You)" : ""}</span>
-            <span class="player-score">Score: ${score}</span>
+            <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
+            <div class="player-info">
+                <div class="player-name">${player.name}${player.id === playerId ? " (You)" : ""}</div>
+                <div class="player-score">
+                    <span class="score-label">Score:</span>
+                    <span class="score-value">${score}</span>
+                </div>
+            </div>
         `;
         container.appendChild(playerDiv);
     });
@@ -287,11 +349,11 @@ function updatePlayerList(players, scores) {
 
 
 function updateScores(scores) {
-    const playerItems = document.querySelectorAll(".player-item");
-    playerItems.forEach((item, index) => {
-        const scoreSpan = item.querySelector(".player-score");
-        if (scoreSpan && scores[index] !== undefined) {
-            scoreSpan.textContent = `Score: ${scores[index]}`;
+    const playerCards = document.querySelectorAll(".player-card");
+    playerCards.forEach((card, index) => {
+        const scoreValue = card.querySelector(".score-value");
+        if (scoreValue && scores[index] !== undefined) {
+            scoreValue.textContent = scores[index];
         }
     });
 }
@@ -300,7 +362,7 @@ function updateScores(scores) {
 function createNumberButtons(max) {
     const container = document.getElementById("number-buttons");
     container.innerHTML = "";
-    container.style.display = "flex";
+    container.style.display = "grid";
 
     for (let i = 1; i <= max; i++) {
         const btn = document.createElement("button");
@@ -311,7 +373,6 @@ function createNumberButtons(max) {
         if (usedNumbers.includes(i)) {
             btn.className += " used-number";
             btn.disabled = true;
-            btn.title = "Already used";
         } else {
             btn.onclick = () => submitMove(i);
         }
@@ -323,17 +384,17 @@ function createNumberButtons(max) {
 
 function submitMove(n) {
     if (!gameStarted) {
-        alert("Game hasn't started yet!");
+        showNotification("Game hasn't started yet!", "error");
         return;
     }
     
     if (hasSubmittedThisRound) {
-        alert("You've already submitted your choice for this round!");
+        showNotification("You've already submitted your choice!", "error");
         return;
     }
     
     if (usedNumbers.includes(n)) {
-        alert("You've already used this number in a previous round!");
+        showNotification("You've already used this number!", "error");
         return;
     }
 
@@ -349,9 +410,7 @@ function submitMove(n) {
     const buttons = document.querySelectorAll(".number-button");
     buttons.forEach(btn => {
         if (parseInt(btn.textContent) === n) {
-            btn.style.backgroundColor = "#28a745";
-            btn.style.color = "white";
-            btn.style.borderColor = "#28a745";
+            btn.classList.add("selected");
         }
         btn.disabled = true;
     });
@@ -361,9 +420,14 @@ function submitMove(n) {
     if (!waitingDiv) {
         waitingDiv = document.createElement("div");
         waitingDiv.id = "waiting-message";
-        document.getElementById("game-ui").appendChild(waitingDiv);
+        waitingDiv.className = "waiting-message";
+        document.querySelector(".game-area").appendChild(waitingDiv);
     }
-    waitingDiv.textContent = `You chose ${n}. Waiting for other players...`;
+    waitingDiv.innerHTML = `
+        <div class="check-icon">✓</div>
+        <p>You chose <strong>${n}</strong></p>
+        <p class="waiting-text">Waiting for other players...</p>
+    `;
     waitingDiv.style.display = "block";
 }
 
@@ -387,24 +451,27 @@ function showRoundResults(msg) {
     if (!resultsDiv) {
         resultsDiv = document.createElement("div");
         resultsDiv.id = "round-results";
-        document.getElementById("game-ui").appendChild(resultsDiv);
+        document.querySelector(".game-area").appendChild(resultsDiv);
     }
 
     resultsDiv.innerHTML = `
         <div class="round-winner-announcement">
-            <h3>🏆 Round ${msg.current_round} Winner${msg.winners.length > 1 ? 's' : ''}: ${msg.winners.join(", ")} 🏆</h3>
-            <p class="highest-number">Highest Number: <strong>${msg.highest}</strong></p>
+            <div class="trophy-icon">🏆</div>
+            <h3>Round ${msg.current_round} Winner${msg.winners.length > 1 ? 's' : ''}</h3>
+            <div class="winner-names">${msg.winners.join(", ")}</div>
+            <div class="highest-number">Highest: <span>${msg.highest}</span></div>
         </div>
-        <h4>All Players' Choices:</h4>
-        <ul class="choices-list">
+        <div class="choices-grid">
             ${Object.entries(msg.player_choices).map(([name, choice]) => 
-                `<li>
+                `<div class="choice-item ${choice === msg.highest ? 'winning-choice' : ''}">
                     <span class="choice-name">${name}</span>
-                    <span class="choice-number ${choice === msg.highest ? 'winning-choice' : ''}">${choice}</span>
-                </li>`
+                    <span class="choice-number">${choice}</span>
+                </div>`
             ).join("")}
-        </ul>
-        <p class="next-round-message">Next round starting in 5 seconds...</p>
+        </div>
+        <div class="next-round-timer">
+            <p>Next round in 5 seconds...</p>
+        </div>
     `;
     resultsDiv.style.display = "block";
 }
@@ -414,17 +481,46 @@ function showGameOver(msg) {
     const gameUI = document.getElementById("game-ui");
     gameUI.innerHTML = `
         <div class="game-over-container">
-            <h2>🎮 Game Over! 🎮</h2>
-            <h3 class="final-winner">Winner(s): ${msg.winners.join(", ")}</h3>
-            <h4>Final Scores:</h4>
-            <ul class="final-scores">
-                ${msg.players.map(player => 
-                    `<li class="${msg.winners.includes(player.name) ? 'winner-score' : ''}">
-                        ${player.name}: <strong>${msg.final_scores[player.id]} points</strong>
-                    </li>`
-                ).join("")}
-            </ul>
+            <div class="game-over-header">
+                <div class="crown-icon">👑</div>
+                <h2>Game Over!</h2>
+            </div>
+            <div class="final-winner">
+                <h3>Winner${msg.winners.length > 1 ? 's' : ''}</h3>
+                <div class="winner-names">${msg.winners.join(", ")}</div>
+            </div>
+            <div class="final-scores-container">
+                <h4>Final Scores</h4>
+                <div class="final-scores">
+                    ${msg.players.map(player => 
+                        `<div class="score-item ${msg.winners.includes(player.name) ? 'winner-score' : ''}">
+                            <div class="score-player">
+                                <div class="player-avatar small">${player.name.charAt(0).toUpperCase()}</div>
+                                <span>${player.name}</span>
+                            </div>
+                            <div class="score-points">${msg.final_scores[player.id]}</div>
+                        </div>`
+                    ).join("")}
+                </div>
+            </div>
             <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
         </div>
     `;
+}
+
+
+function showNotification(message, type = "info") {
+    const notification = document.createElement("div");
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.classList.add("show");
+    }, 10);
+    
+    setTimeout(() => {
+        notification.classList.remove("show");
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
 }
