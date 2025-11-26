@@ -54,7 +54,14 @@ if (joinForm) {
                 player_name: name
             })
         })
-        .then(r => r.json())
+        .then(async r => {
+            const text = await r.text();
+            try {
+                return JSON.parse(text);
+            } catch {
+                throw new Error("Server returned: " + text);
+            }
+        })
         .then(d => {
             if (d.status !== "joined") {
                 alert(d.message || "Failed to join room.");
