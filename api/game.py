@@ -4,7 +4,9 @@ import random
 import time
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='eventlet')
+
+# Use gevent for async mode, compatible with Vercel
+socketio = SocketIO(app, async_mode='gevent')
 
 # Store game rooms in memory
 rooms = {}
@@ -90,3 +92,7 @@ def handle_player_move(room_code, player_id, number):
 # Vercel serverless deployment entry point
 def handler(environ, start_response):
     return app(environ, start_response)
+
+# Run the app (For local development)
+if __name__ == '__main__':
+    socketio.run(app, debug=True)
