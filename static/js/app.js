@@ -6,10 +6,13 @@ let hasSubmittedThisRound = false;
 let gameStarted = false;
 let roundTimer = null;
 let timeRemaining = 15;
-let usedNumbers = [];  // Track which numbers this player has already used
-let maxNumber = 10;  // Max number available (will be set to num_rounds)
+let usedNumbers = [];
+let maxNumber = 10;
+let roundTime = 15;
 
-/* Create Room */
+/* =========================
+   ROOM CREATION
+========================= */
 const createForm = document.getElementById("create-room-form");
 if (createForm) {
     createForm.addEventListener("submit", e => {
@@ -18,6 +21,7 @@ if (createForm) {
         const numPlayers = document.getElementById("num_players").value;
         const numRounds = document.getElementById("num_rounds").value;
         const playerName = document.getElementById("creator_name").value;
+        roundTime = parseInt(document.getElementById("round_time").value);
 
         fetch("/create_room", {
             method: "POST",
@@ -27,7 +31,8 @@ if (createForm) {
             body: new URLSearchParams({
                 num_players: numPlayers,
                 num_rounds: numRounds,
-                player_name: playerName
+                player_name: playerName,
+                round_time: roundTime
             })
         })
         .then(r => r.json())
@@ -35,14 +40,11 @@ if (createForm) {
             roomCode = d.room_code;
             playerId = d.player_id;
 
-            // Hide lobby, show game UI
             document.getElementById("lobby").style.display = "none";
             document.getElementById("game-ui").style.display = "block";
             
-            // Display room code at top
             document.getElementById("room-code-display").textContent = roomCode;
 
-            // Connect WebSocket
             const protocol = location.protocol === "https:" ? "wss" : "ws";
             ws = new WebSocket(`${protocol}://${location.host}/ws`);
 
@@ -66,8 +68,9 @@ if (createForm) {
     });
 }
 
-
-/* Join Room */
+/* =========================
+   ROOM JOINING
+========================= */
 const joinForm = document.getElementById("join-room-form");
 if (joinForm) {
     joinForm.addEventListener("submit", e => {
@@ -103,14 +106,11 @@ if (joinForm) {
             roomCode = d.room_code;
             playerId = d.player_id;
 
-            // Hide lobby, show game UI
             document.getElementById("lobby").style.display = "none";
             document.getElementById("game-ui").style.display = "block";
             
-            // Display room code at top
             document.getElementById("room-code-display").textContent = roomCode;
 
-            // Connect WebSocket
             const protocol = location.protocol === "https:" ? "wss" : "ws";
             ws = new WebSocket(`${protocol}://${location.host}/ws`);
 
@@ -137,7 +137,9 @@ if (joinForm) {
     });
 }
 
-/* Toggle between Create and Join */
+/* =========================
+   VIEW TOGGLING
+========================= */
 function showCreateRoom() {
     document.getElementById("create-room").style.display = "block";
     document.getElementById("join-room").style.display = "none";
@@ -152,13 +154,16 @@ function showJoinRoom() {
     document.getElementById("btn-join").classList.add("active");
 }
 
-
+/* =========================
+   WEBSOCKET MESSAGE HANDLER
+========================= */
 function handleMessage(msg) {
     if (msg.type === "game_state") {
         currentRound = msg.state.current_round;
         gameStarted = msg.state.game_started;
         usedNumbers = msg.used_numbers || [];
-        maxNumber = msg.state.num_rounds;  // Set max number to num_rounds
+        maxNumber = msg.state.num_rounds;
+        roundTime = msg.state.round_time ?? roundTime;
         
         document.getElementById("current-round").textContent = currentRound;
         document.getElementById("total-rounds").textContent = msg.state.num_rounds;
@@ -166,6 +171,7 @@ function handleMessage(msg) {
         updatePlayerList(msg.state.players, msg.state.scores);
         
         if (gameStarted) {
+            hideWaitingForPlayers();
             createNumberButtons(maxNumber);
             startRoundTimer();
         } else {
@@ -176,19 +182,23 @@ function handleMessage(msg) {
     }
 
     if (msg.type === "player_update") {
-        // Update maxNumber if we have num_rounds info
         if (msg.num_rounds) {
             maxNumber = msg.num_rounds;
         }
+
+        if (msg.round_time !== undefined) {
+            roundTime = msg.round_time;
+        }
         
         updatePlayerList(msg.players, msg.scores);
-        
-        if (msg.game_started && !gameStarted) {
-            gameStarted = true;
+
+        gameStarted = msg.game_started;
+
+        if (gameStarted) {
+            hideWaitingForPlayers();
             createNumberButtons(maxNumber);
             startRoundTimer();
-            hideWaitingForPlayers();
-        } else if (!msg.game_started) {
+        } else {
             showWaitingForPlayers(msg.players.length, msg.num_players);
         }
     }
@@ -206,11 +216,7 @@ function handleMessage(msg) {
     if (msg.type === "round_result") {
         stopRoundTimer();
         hasSubmittedThisRound = false;
-        
-        // Update scores
         updateScores(msg.scores);
-        
-        // Show round results with 5s display
         showRoundResults(msg);
     }
 
@@ -219,22 +225,14 @@ function handleMessage(msg) {
         document.getElementById("current-round").textContent = currentRound;
         hasSubmittedThisRound = false;
         
-        // Hide results and show number buttons again
         const resultsDiv = document.getElementById("round-results");
-        if (resultsDiv) {
-            resultsDiv.style.display = "none";
-        }
+        if (resultsDiv) resultsDiv.style.display = "none";
         
         const waitingDiv = document.getElementById("waiting-message");
-        if (waitingDiv) {
-            waitingDiv.style.display = "none";
-        }
+        if (waitingDiv) waitingDiv.style.display = "none";
         
-        // Re-enable number buttons for new round (used numbers will stay disabled)
         createNumberButtons(maxNumber);
         document.getElementById("number-buttons").style.display = "grid";
-        
-        // Start new timer
         startRoundTimer();
     }
 
@@ -244,10 +242,12 @@ function handleMessage(msg) {
     }
 }
 
-
+/* =========================
+   ROUND TIMER
+========================= */
 function startRoundTimer() {
     stopRoundTimer();
-    timeRemaining = 15;
+    timeRemaining = parseInt(roundTime);
     updateTimerDisplay();
     
     roundTimer = setInterval(() => {
@@ -260,7 +260,6 @@ function startRoundTimer() {
     }, 1000);
 }
 
-
 function stopRoundTimer() {
     if (roundTimer) {
         clearInterval(roundTimer);
@@ -268,25 +267,38 @@ function stopRoundTimer() {
     }
 }
 
-
 function updateTimerDisplay() {
     const timerBar = document.getElementById("timer-bar");
     const timerText = document.getElementById("timer-text");
     
     if (timerBar && timerText) {
-        const percentage = (timeRemaining / 15) * 100;
+        const totalTime = parseInt(roundTime);
+        const percentage = (timeRemaining / totalTime) * 100;
         timerBar.style.width = percentage + "%";
-        timerText.textContent = `${timeRemaining}s`;
+        timerText.textContent = `${timeRemaining}s remaining`;
         
-        if (timeRemaining <= 5) {
-            timerBar.style.backgroundColor = "#ef4444";
+        const lowThreshold = totalTime * 0.33;
+        const medThreshold = totalTime * 0.66;
+        
+        if (timeRemaining <= lowThreshold) {
+            timerBar.style.background = "linear-gradient(90deg, #ef4444 0%, #dc2626 100%)";
+            timerBar.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.8)";
+            timerText.style.color = "#ef4444";
+        } else if (timeRemaining <= medThreshold) {
+            timerBar.style.background = "linear-gradient(90deg, #f59e0b 0%, #d97706 100%)";
+            timerBar.style.boxShadow = "0 0 12px rgba(245, 158, 11, 0.6)";
+            timerText.style.color = "#d97706";
         } else {
-            timerBar.style.backgroundColor = "#8b5cf6";
+            timerBar.style.background = "linear-gradient(90deg, #8b5cf6 0%, #667eea 100%)";
+            timerBar.style.boxShadow = "0 0 10px rgba(139, 92, 246, 0.5)";
+            timerText.style.color = "#1f2937";
         }
     }
 }
 
-
+/* =========================
+   WAITING STATES
+========================= */
 function showWaitingForPlayers(current, total) {
     const numberButtons = document.getElementById("number-buttons");
     numberButtons.style.display = "none";
@@ -296,10 +308,8 @@ function showWaitingForPlayers(current, total) {
         waitingDiv = document.createElement("div");
         waitingDiv.id = "waiting-for-players";
         waitingDiv.className = "waiting-players-message";
-        document.querySelector(".game-area").insertBefore(
-            waitingDiv, 
-            document.getElementById("number-buttons")
-        );
+        const gameArea = document.querySelector(".game-area");
+        gameArea.appendChild(waitingDiv);
     }
     
     waitingDiv.innerHTML = `
@@ -313,15 +323,14 @@ function showWaitingForPlayers(current, total) {
     waitingDiv.style.display = "block";
 }
 
-
 function hideWaitingForPlayers() {
     const waitingDiv = document.getElementById("waiting-for-players");
-    if (waitingDiv) {
-        waitingDiv.style.display = "none";
-    }
+    if (waitingDiv) waitingDiv.style.display = "none";
 }
 
-
+/* =========================
+   PLAYER STATE
+========================= */
 function updatePlayerList(players, scores) {
     const container = document.getElementById("players-list");
     container.innerHTML = "";
@@ -329,9 +338,7 @@ function updatePlayerList(players, scores) {
     players.forEach((player, index) => {
         const playerDiv = document.createElement("div");
         playerDiv.className = "player-card";
-        if (player.id === playerId) {
-            playerDiv.classList.add("current-player");
-        }
+        if (player.id === playerId) playerDiv.classList.add("current-player");
         const score = scores[player.id] || 0;
         playerDiv.innerHTML = `
             <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
@@ -347,7 +354,6 @@ function updatePlayerList(players, scores) {
     });
 }
 
-
 function updateScores(scores) {
     const playerCards = document.querySelectorAll(".player-card");
     playerCards.forEach((card, index) => {
@@ -358,7 +364,9 @@ function updateScores(scores) {
     });
 }
 
-
+/* =========================
+   GAME INPUT
+========================= */
 function createNumberButtons(max) {
     const container = document.getElementById("number-buttons");
     container.innerHTML = "";
@@ -369,7 +377,6 @@ function createNumberButtons(max) {
         btn.textContent = i;
         btn.className = "number-button";
         
-        // Check if this number has been used before
         if (usedNumbers.includes(i)) {
             btn.className += " used-number";
             btn.disabled = true;
@@ -380,7 +387,6 @@ function createNumberButtons(max) {
         container.appendChild(btn);
     }
 }
-
 
 function submitMove(n) {
     if (!gameStarted) {
@@ -404,9 +410,8 @@ function submitMove(n) {
     }));
 
     hasSubmittedThisRound = true;
-    usedNumbers.push(n);  // Add to local used numbers immediately
+    usedNumbers.push(n);
     
-    // Disable all buttons and highlight selected
     const buttons = document.querySelectorAll(".number-button");
     buttons.forEach(btn => {
         if (parseInt(btn.textContent) === n) {
@@ -415,7 +420,6 @@ function submitMove(n) {
         btn.disabled = true;
     });
     
-    // Show waiting message
     let waitingDiv = document.getElementById("waiting-message");
     if (!waitingDiv) {
         waitingDiv = document.createElement("div");
@@ -431,21 +435,17 @@ function submitMove(n) {
     waitingDiv.style.display = "block";
 }
 
-
+/* =========================
+   ROUND RESULTS
+========================= */
 function showRoundResults(msg) {
-    // Stop timer
     stopRoundTimer();
     
-    // Hide waiting message and buttons
     const waitingDiv = document.getElementById("waiting-message");
-    if (waitingDiv) {
-        waitingDiv.style.display = "none";
-    }
+    if (waitingDiv) waitingDiv.style.display = "none";
     
     const buttonsDiv = document.getElementById("number-buttons");
-    if (buttonsDiv) {
-        buttonsDiv.style.display = "none";
-    }
+    if (buttonsDiv) buttonsDiv.style.display = "none";
 
     let resultsDiv = document.getElementById("round-results");
     if (!resultsDiv) {
@@ -476,7 +476,9 @@ function showRoundResults(msg) {
     resultsDiv.style.display = "block";
 }
 
-
+/* =========================
+   GAME OVER
+========================= */
 function showGameOver(msg) {
     const gameUI = document.getElementById("game-ui");
     gameUI.innerHTML = `
@@ -508,7 +510,9 @@ function showGameOver(msg) {
     `;
 }
 
-
+/* =========================
+   NOTIFICATIONS
+========================= */
 function showNotification(message, type = "info") {
     const notification = document.createElement("div");
     notification.className = `notification notification-${type}`;

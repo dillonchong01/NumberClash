@@ -9,13 +9,13 @@ app = Flask(__name__)
 sock = Sock(app)
 
 rooms = {}
-clients = {}  # ws -> (room_code, player_id)
-round_timers = {}  # room_code -> timer thread
+clients = {}
+round_timers = {}
 
 
-def create_room(num_players, num_rounds):
+def create_room(num_players, num_rounds, round_time):
+    """Create a new game room with specified settings."""
     room_code = str(random.randint(1000, 9999))
-    # Ensure unique room code
     while room_code in rooms:
         room_code = str(random.randint(1000, 9999))
     
@@ -23,98 +23,103 @@ def create_room(num_players, num_rounds):
         "players": [],
         "num_players": num_players,
         "num_rounds": num_rounds,
+        "round_time": round_time,
         "current_round": 1,
         "scores": {},
         "player_numbers": {},
         "current_round_choices": {},
         "game_started": False,
         "round_in_progress": False,
-        "used_numbers": {}  # player_id -> set of used numbers
+        "used_numbers": {}
     }
     return room_code
 
 
 def determine_winner(player_choices):
+    """
+    Determine the winner(s) of a round based on player choices.
+    Returns empty list if there's a draw (multiple players with highest number).
+    """
     if not player_choices:
         return [], 0
+    
     highest = max(player_choices.values())
     winners = [pid for pid, choice in player_choices.items() if choice == highest]
+    
+    # In case of draw, no one gets a point
+    if len(winners) > 1:
+        return [], highest
+    
     return winners, highest
 
 
 def auto_pick_for_inactive_players(room_code):
-    """Auto-pick random numbers for players who haven't submitted"""
+    """Automatically pick random numbers for players who didn't submit in time."""
     if room_code not in rooms:
         return
         
     room = rooms[room_code]
     
-    # Check if round is still in progress
     if not room.get("round_in_progress", False):
         return
     
-    # For players who haven't submitted, randomly pick an available number
     for player in room["players"]:
         pid = player["id"]
         if pid not in room["current_round_choices"]:
-            # Get available numbers (1 to num_rounds, excluding used ones)
             max_number = room["num_rounds"]
             used_by_player = room["used_numbers"].get(pid, set())
             available_numbers = [n for n in range(1, max_number + 1) if n not in used_by_player]
             
             if available_numbers:
-                # Randomly pick from available numbers
                 random_choice = random.choice(available_numbers)
                 room["current_round_choices"][pid] = random_choice
-                room["used_numbers"][pid].add(random_choice)  # Mark as used for future rounds
+                room["used_numbers"][pid].add(random_choice)
                 
-                # Broadcast to this specific player that a number was auto-picked
                 broadcast_to_player(room_code, pid, {
                     "type": "auto_picked",
                     "number": random_choice
                 })
             else:
-                # No numbers left, assign 0
                 room["current_round_choices"][pid] = 0
     
-    # Process round immediately after auto-picking
     process_round_end(room_code)
 
 
 def start_round_timer(room_code):
-    """Start a 15-second timer for the current round"""
+    """Start a countdown timer for the current round."""
+    if room_code not in rooms:
+        return
+    
+    room = rooms[room_code]
+    round_time = room.get("round_time", 15)
+    
     def timer_callback():
         auto_pick_for_inactive_players(room_code)
     
-    # Cancel existing timer if any
     if room_code in round_timers:
         round_timers[room_code].cancel()
     
-    # Start new timer - will call auto_pick function after exactly 15 seconds
-    timer = threading.Timer(15.0, timer_callback)
+    timer = threading.Timer(float(round_time + 1), timer_callback)
     timer.daemon = True
     timer.start()
     round_timers[room_code] = timer
 
 
 def process_round_end(room_code):
-    """Process the end of a round"""
+    """Process the end of a round, update scores, and determine next action."""
     if room_code not in rooms:
         return
         
     room = rooms[room_code]
-    
-    # Mark round as no longer in progress
     room["round_in_progress"] = False
     
-    # Cancel timer
     if room_code in round_timers:
         round_timers[room_code].cancel()
         del round_timers[room_code]
     
     choices = room["current_round_choices"]
     
-    # For players who didn't submit (shouldn't happen now), assign 0
+    # Assign 0 to players who didn't submit (shouldn't happen after auto-pick)
     for player in room["players"]:
         pid = player["id"]
         if pid not in choices:
@@ -122,50 +127,56 @@ def process_round_end(room_code):
     
     winners, highest = determine_winner(choices)
     
-    # Update scores
+    # Award points only to winners (empty if draw)
     for w in winners:
         room["scores"][w] += 1
     
-    # Store choices in history
     for pid, choice in choices.items():
         room["player_numbers"][pid].append(choice)
     
-    # Prepare round result with player names
+    # Prepare player choices for display
     player_choices_display = {}
     for pid, choice in choices.items():
         player_name = room["players"][pid]["name"]
         player_choices_display[player_name] = choice
     
-    winner_names = [room["players"][w]["name"] for w in winners]
+    winner_names = [room["players"][w]["name"] for w in winners] if winners else []
     
-    # Broadcast round results
     broadcast(room_code, {
         "type": "round_result",
         "winners": winner_names,
         "highest": highest,
         "scores": room["scores"],
         "player_choices": player_choices_display,
-        "current_round": room["current_round"]
+        "current_round": room["current_round"],
+        "is_draw": len(winners) == 0 and highest > 0
     })
     
     # Check if game is over
     if room["current_round"] >= room["num_rounds"]:
-        # Game over
-        max_score = max(room["scores"].values()) if room["scores"] else 0
-        final_winners = [
-            room["players"][pid]["name"] 
-            for pid, score in room["scores"].items() 
-            if score == max_score
-        ]
-        
-        broadcast(room_code, {
-            "type": "game_over",
-            "winners": final_winners,
-            "final_scores": room["scores"],
-            "players": room["players"]
-        })
+        def send_game_over():
+            if room_code not in rooms:
+                return
+
+            max_score = max(room["scores"].values()) if room["scores"] else 0
+            final_winners = [
+                room["players"][pid]["name"]
+                for pid, score in room["scores"].items()
+                if score == max_score
+            ]
+
+            broadcast(room_code, {
+                "type": "game_over",
+                "winners": final_winners,
+                "final_scores": room["scores"],
+                "players": room["players"]
+            })
+
+        timer = threading.Timer(5.0, send_game_over)
+        timer.daemon = True
+        timer.start()
     else:
-        # Schedule next round after 5 seconds
+        # Start next round after 5 second delay
         def start_next_round():
             time.sleep(5)
             if room_code not in rooms:
@@ -175,13 +186,11 @@ def process_round_end(room_code):
             room["current_round_choices"] = {}
             room["round_in_progress"] = True
             
-            # Broadcast new round started
             broadcast(room_code, {
                 "type": "next_round",
                 "current_round": room["current_round"]
             })
             
-            # Start timer for new round
             start_round_timer(room_code)
         
         timer = threading.Timer(5.0, start_next_round)
@@ -203,13 +212,14 @@ def game_room(room_code):
 
 @app.route("/create_room", methods=["POST"])
 def create_new_room():
+    """Create a new game room and add the creator as the first player."""
     num_players = int(request.form["num_players"])
     num_rounds = int(request.form["num_rounds"])
+    round_time = int(request.form.get("round_time", 15))
     player_name = request.form["player_name"]
     
-    room_code = create_room(num_players, num_rounds)
+    room_code = create_room(num_players, num_rounds, round_time)
     
-    # Add creator as first player
     room = rooms[room_code]
     player_id = 0
     room["players"].append({"id": player_id, "name": player_name})
@@ -225,31 +235,28 @@ def create_new_room():
 
 @app.route("/join_room", methods=["POST"])
 def join_existing_room():
+    """Add a player to an existing game room."""
     room_code = request.form["room_code"]
     player_name = request.form["player_name"]
 
-    # Check if room exists
     if room_code not in rooms:
         return jsonify({"status": "error", "message": "Room not found"})
     
     room = rooms[room_code]
     
-    # Check if room is full
     if len(room["players"]) >= room["num_players"]:
         return jsonify({"status": "error", "message": "Room is full"})
     
-    # Add player
     player_id = len(room["players"])
     room["players"].append({"id": player_id, "name": player_name})
     room["scores"][player_id] = 0
     room["player_numbers"][player_id] = []
-    room["used_numbers"][player_id] = set()  # Initialize empty set for used numbers
+    room["used_numbers"][player_id] = set()
     
-    # Check if room is now full and start game
+    # Start game when room is full
     if len(room["players"]) == room["num_players"]:
         room["game_started"] = True
         room["round_in_progress"] = True
-        # Start the timer for round 1
         start_round_timer(room_code)
     
     return jsonify({
@@ -261,7 +268,7 @@ def join_existing_room():
 
 @sock.route("/ws")
 def ws(ws):
-    print("WebSocket connected")
+    """Handle WebSocket connections for real-time game updates."""
     room_code = None
     player_id = None
 
@@ -269,7 +276,6 @@ def ws(ws):
         while True:
             data = ws.receive()
             if data is None:
-                print("WebSocket disconnected")
                 break
 
             msg = json.loads(data)
@@ -279,7 +285,6 @@ def ws(ws):
                 player_id = msg["player_id"]
                 clients[ws] = (room_code, player_id)
 
-                # Send initial game state
                 room = rooms[room_code]
                 safe_room = dict(room)
                 safe_room["used_numbers"] = {
@@ -293,14 +298,14 @@ def ws(ws):
                     "num_players": room["num_players"]
                 }))
                                 
-                # Broadcast updated player list to all players
                 broadcast(room_code, {
                     "type": "player_update",
                     "players": room["players"],
                     "scores": room["scores"],
                     "game_started": room["game_started"],
                     "num_players": room["num_players"],
-                    "num_rounds": room["num_rounds"]
+                    "num_rounds": room["num_rounds"],
+                    "round_time": room["round_time"]
                 })
 
             elif msg["type"] == "move":
@@ -310,32 +315,23 @@ def ws(ws):
                 room_code, player_id = clients[ws]
                 room = rooms[room_code]
                 
-                # Check if game has started
                 if not room.get("game_started", False):
                     continue
                 
-                # Check if round is in progress
                 if not room.get("round_in_progress", False):
                     continue
                 
                 number = msg["number"]
 
-                # Store the choice for this round (only if not already submitted)
                 if player_id not in room["current_round_choices"]:
-                    # Check if number was already used by this player
                     if number in room["used_numbers"].get(player_id, set()):
-                        # Number already used, ignore this move
                         continue
                     
                     room["current_round_choices"][player_id] = number
-                    room["used_numbers"][player_id].add(number)  # Mark as used
+                    room["used_numbers"][player_id].add(number)
 
-                    # Check if all players have made their choice
-                    num_choices = len(room["current_round_choices"])
-                    num_players = len(room["players"])
-                    
-                    if num_choices == num_players:
-                        # All players have chosen, process immediately
+                    # Process round immediately if all players have chosen
+                    if len(room["current_round_choices"]) == len(room["players"]):
                         process_round_end(room_code)
 
     except Exception as e:
@@ -346,6 +342,7 @@ def ws(ws):
 
 
 def broadcast(room_code, message):
+    """Send a message to all players in a room."""
     dead = []
     for client_ws, (r, _) in list(clients.items()):
         if r == room_code:
@@ -360,7 +357,7 @@ def broadcast(room_code, message):
 
 
 def broadcast_to_player(room_code, player_id, message):
-    """Broadcast a message to a specific player"""
+    """Send a message to a specific player in a room."""
     for client_ws, (r, pid) in list(clients.items()):
         if r == room_code and pid == player_id:
             try:
@@ -371,5 +368,4 @@ def broadcast_to_player(room_code, player_id, message):
 
 
 if __name__ == "__main__":
-    print("Starting Flask-Sock server...")
     app.run(host="127.0.0.1", port=5000, debug=True)
