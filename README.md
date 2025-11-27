@@ -2,14 +2,13 @@
 
 **Number Clash** is a fast-paced real-time multiplayer browser game where players compete by selecting the highest number each round. Strategy, timing, and prediction decide the winner.
 
-Play here:  
-👉 https://numberclash.onrender.com
+Play here 👉 https://numberclash.onrender.com
 
 ---
 
 ## 🕹️ How to Play
 
-1. **Create or Join a Room**
+1. **Create / Join a Room**
    - Set the Number of Players (2-4) and Time per Round
    - Share the 4-digit room code with friends.
 
@@ -36,3 +35,7 @@ Play here:
 ## 🚀 Play Now
 
 👉 https://numberclash.onrender.com
+
+---
+
+*Note: This game is hosted via Render free-tier. If too many rooms are active at the same time, you may experience lag or temporary crashes.*
