@@ -1,0 +1,14 @@
+name: Keep NumberClash Alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping NumberClash
+        run: |
+          curl -s -o /dev/null https://numberclash.onrender.com/
