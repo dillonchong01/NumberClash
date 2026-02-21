@@ -4,6 +4,7 @@ import json
 import random
 import threading
 import time
+import uuid
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -32,7 +33,10 @@ def create_room(num_players, num_rounds, round_time):
         "current_round_choices": {},
         "game_started": False,
         "round_in_progress": False,
-        "used_numbers": {}
+        "round_resolving": False,
+        "owner_id": 0,
+        "used_numbers": {},
+        "reconnect_tokens": {}
     }
     return room_code
 
@@ -110,6 +114,10 @@ def process_round_end(room_code):
         return
         
     room = rooms[room_code]
+    if room.get("round_resolving"):
+        return
+
+    room["round_resolving"] = True
     room["round_in_progress"] = False
     
     # Stop the active round timer
@@ -179,6 +187,7 @@ def process_round_end(room_code):
             room["current_round"] += 1
             room["current_round_choices"] = {}
             room["round_in_progress"] = True
+            room["round_resolving"] = False
             
             broadcast(room_code, {
                 "type": "next_round",
@@ -214,6 +223,8 @@ def create_new_room():
     round_time = int(request.form.get("round_time", 15))
     player_name = request.form["player_name"]
     
+    reconnect_token = request.form.get("reconnect_token") or str(uuid.uuid4())
+
     room_code = create_room(num_players, num_rounds, round_time)
     
     room = rooms[room_code]
@@ -222,10 +233,12 @@ def create_new_room():
     room["scores"][player_id] = 0
     room["player_numbers"][player_id] = []
     room["used_numbers"][player_id] = set()
+    room["reconnect_tokens"][reconnect_token] = player_id
     
     return jsonify({
         "room_code": room_code,
-        "player_id": player_id
+        "player_id": player_id,
+        "reconnect_token": reconnect_token
     })
 
 
@@ -234,11 +247,22 @@ def join_existing_room():
     """Allow a player to join an existing room."""
     room_code = request.form["room_code"]
     player_name = request.form["player_name"]
+    reconnect_token = request.form.get("reconnect_token")
 
     if room_code not in rooms:
         return jsonify({"status": "error", "message": "Room not found"})
     
     room = rooms[room_code]
+
+    if reconnect_token and reconnect_token in room["reconnect_tokens"]:
+        existing_player_id = room["reconnect_tokens"][reconnect_token]
+        return jsonify({
+            "status": "joined",
+            "player_id": existing_player_id,
+            "room_code": room_code,
+            "reconnect_token": reconnect_token,
+            "rejoined": True
+        })
     
     if len(room["players"]) >= room["num_players"]:
         return jsonify({"status": "error", "message": "Room is full"})
@@ -248,18 +272,50 @@ def join_existing_room():
     room["scores"][player_id] = 0
     room["player_numbers"][player_id] = []
     room["used_numbers"][player_id] = set()
-    
-    # Start the game when the room becomes full
-    if len(room["players"]) == room["num_players"]:
-        room["game_started"] = True
-        room["round_in_progress"] = True
-        start_round_timer(room_code)
+    reconnect_token = reconnect_token or str(uuid.uuid4())
+    room["reconnect_tokens"][reconnect_token] = player_id
     
     return jsonify({
         "status": "joined",
         "player_id": player_id,
-        "room_code": room_code
+        "room_code": room_code,
+        "reconnect_token": reconnect_token
     })
+
+
+@app.route("/start_game", methods=["POST"])
+def start_game():
+    room_code = request.form["room_code"]
+    player_id = int(request.form["player_id"])
+
+    if room_code not in rooms:
+        return jsonify({"status": "error", "message": "Room not found"})
+
+    room = rooms[room_code]
+    if room["owner_id"] != player_id:
+        return jsonify({"status": "error", "message": "Only room owner can start"})
+    if len(room["players"]) < room["num_players"]:
+        return jsonify({"status": "error", "message": "Wait for all players to join"})
+    if room["game_started"]:
+        return jsonify({"status": "ok", "message": "Game already started"})
+
+    room["game_started"] = True
+    room["round_in_progress"] = True
+    room["round_resolving"] = False
+    room["current_round_choices"] = {}
+    start_round_timer(room_code)
+
+    broadcast(room_code, {
+        "type": "player_update",
+        "players": room["players"],
+        "scores": room["scores"],
+        "game_started": room["game_started"],
+        "num_players": room["num_players"],
+        "num_rounds": room["num_rounds"],
+        "round_time": room["round_time"],
+        "owner_id": room["owner_id"]
+    })
+    return jsonify({"status": "ok"})
 
 
 @sock.route("/ws")
@@ -293,7 +349,8 @@ def ws(ws):
                     "type": "game_state",
                     "state": safe_room,
                     "used_numbers": safe_room["used_numbers"].get(player_id, []),
-                    "num_players": room["num_players"]
+                    "num_players": room["num_players"],
+                    "owner_id": room["owner_id"]
                 }))
                                 
                 broadcast(room_code, {
@@ -303,7 +360,8 @@ def ws(ws):
                     "game_started": room["game_started"],
                     "num_players": room["num_players"],
                     "num_rounds": room["num_rounds"],
-                    "round_time": room["round_time"]
+                    "round_time": room["round_time"],
+                    "owner_id": room["owner_id"]
                 })
 
             elif msg["type"] == "move":
@@ -330,7 +388,16 @@ def ws(ws):
 
                     # End the round immediately if all players have selected
                     if len(room["current_round_choices"]) == len(room["players"]):
-                        process_round_end(room_code)
+                        room["round_in_progress"] = False
+                        if room_code in round_timers:
+                            round_timers[room_code].cancel()
+                            del round_timers[room_code]
+
+                        broadcast(room_code, {"type": "round_reveal_pending"})
+
+                        timer = threading.Timer(1.5, lambda: process_round_end(room_code))
+                        timer.daemon = True
+                        timer.start()
 
     except Exception as e:
         print(f"WebSocket error: {e}")
