@@ -7,15 +7,17 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <!-- Lobby -->
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+
     <div id="lobby">
         <div class="lobby-container">
             <div class="logo">
                 <h1>🎯 Number Clash</h1>
-                <p>Choose the highest number to win!</p>
+                <p>Highest unique number wins the round. Use each number once.</p>
             </div>
 
             <div class="tab-buttons">
@@ -29,28 +31,30 @@
                         <label for="creator_name">Your Name</label>
                         <input id="creator_name" type="text" placeholder="Enter your name" maxlength="20" required>
                     </div>
-                    <div class="form-group">
-                        <label for="num_players">Number of Players</label>
-                        <select id="num_players" required>
-                            <option value="2">2 Players</option>
-                            <option value="3">3 Players</option>
-                            <option value="4">4 Players</option>
-                        </select>
+                    <div class="form-group two-col">
+                        <div>
+                            <label for="num_players">Players</label>
+                            <select id="num_players" required>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="round_time">Round Time</label>
+                            <select id="round_time" required>
+                                <option value="5">5s</option>
+                                <option value="10">10s</option>
+                                <option value="15" selected>15s</option>
+                                <option value="20">20s</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="num_rounds">Number of Rounds (5 - 50)</label>
                         <input id="num_rounds" type="number" min="5" max="50" value="10" required>
                     </div>
-                    <div class="form-group">
-                        <label for="round_time">Seconds Per Round</label>
-                        <select id="round_time" required>
-                            <option value="5">5 seconds</option>
-                            <option value="10">10 seconds</option>
-                            <option value="15" selected>15 seconds</option>
-                            <option value="20">20 seconds</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Create Room</button>
+                    <button type="submit" class="btn btn-primary">Start New Room</button>
                 </form>
             </div>
 
@@ -64,44 +68,50 @@
                         <label for="player_name">Your Name</label>
                         <input id="player_name" type="text" placeholder="Enter your name" maxlength="20" required>
                     </div>
-                    <button type="submit" class="btn btn-primary">Join Room</button>
+                    <button type="submit" class="btn btn-primary">Join Match</button>
                 </form>
             </div>
         </div>
     </div>
 
-    <!-- Game UI -->
     <div id="game-ui" style="display:none;">
-        <div class="container">
-            <div class="game-header">
-                <div class="room-info">
-                    <div class="room-code">
-                        <span class="room-code-label">Room Code:</span>
-                        <span class="room-code-value" id="room-code-display">----</span>
+        <div class="container game-grid">
+            <section class="panel main-panel">
+                <header class="match-header">
+                    <div class="room-code-wrap">
+                        <span class="meta-label">Room Code</span>
+                        <button id="room-code-display" class="room-code-value" title="Copy room code">----</button>
                     </div>
-                    <div class="round-info">
-                        <h2>Round <span id="current-round">1</span> / <span id="total-rounds">10</span></h2>
-                    </div>
-                </div>
-                <div class="timer-container">
-                    <div class="timer-bar-bg">
-                        <div id="timer-bar" style="width: 100%;"></div>
-                    </div>
-                    <div id="timer-text"> </div>
-                </div>
-            </div>
+                    <div class="round-pill">Round <span id="current-round">1</span> / <span id="total-rounds">10</span></div>
+                </header>
 
-            <div class="game-area">
-                <h3>Choose Your Number</h3>
-                <div id="number-buttons"></div>
-            </div>
-
-            <div class="players-section">
-                <h3>Players</h3>
-                <div id="players-list">
-                    <!-- Players populated by JavaScript -->
+                <div class="status-strip">
+                    <div class="timer-container">
+                        <div class="timer-bar-bg"><div id="timer-bar" style="width: 100%;"></div></div>
+                        <div id="timer-text">15s remaining</div>
+                    </div>
+                    <div class="round-subtitle" id="round-subtitle">Pick your best available number.</div>
                 </div>
-            </div>
+
+                <div class="game-area">
+                    <h3>Choose Your Number</h3>
+                    <div id="number-buttons"></div>
+                </div>
+            </section>
+
+            <aside class="panel side-panel">
+                <div class="players-section">
+                    <h3>Live Scoreboard</h3>
+                    <div id="players-list"></div>
+                </div>
+
+                <div class="history-section">
+                    <h3>Your Used Numbers</h3>
+                    <div id="used-number-history" class="used-number-history">
+                        <span class="hint">None yet</span>
+                    </div>
+                </div>
+            </aside>
         </div>
     </div>
 
