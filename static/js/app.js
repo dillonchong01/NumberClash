@@ -9,6 +9,8 @@ let timeRemaining = 15;
 let usedNumbers = [];
 let maxNumber = 10;
 let roundTime = 15;
+let ownerId = 0;
+let nextRoundCountdownTimer = null;
 
 const roundSubtitle = document.getElementById("round-subtitle");
 
@@ -25,12 +27,13 @@ if (createForm) {
         fetch("/create_room", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ num_players: numPlayers, num_rounds: numRounds, player_name: playerName, round_time: roundTime })
+            body: new URLSearchParams({ num_players: numPlayers, num_rounds: numRounds, player_name: playerName, round_time: roundTime, reconnect_token: "" })
         })
             .then((r) => r.json())
             .then((d) => {
                 roomCode = d.room_code;
                 playerId = d.player_id;
+                if (d.reconnect_token) saveReconnectToken(d.reconnect_token);
                 enterGameUI();
                 connectWebSocket();
             });
@@ -44,11 +47,12 @@ if (joinForm) {
 
         const code = document.getElementById("room_code").value;
         const name = document.getElementById("player_name").value;
+        const reconnectToken = getReconnectToken(code);
 
         fetch("/join_room", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ room_code: code, player_name: name })
+            body: new URLSearchParams({ room_code: code, player_name: name, reconnect_token: reconnectToken || "" })
         })
             .then(async (r) => {
                 const text = await r.text();
@@ -66,6 +70,7 @@ if (joinForm) {
 
                 roomCode = d.room_code;
                 playerId = d.player_id;
+                if (d.reconnect_token) saveReconnectToken(d.reconnect_token);
                 enterGameUI();
                 connectWebSocket();
             })
@@ -110,6 +115,7 @@ function handleMessage(msg) {
     if (msg.type === "game_state") {
         currentRound = msg.state.current_round;
         gameStarted = msg.state.game_started;
+        ownerId = msg.owner_id ?? msg.state.owner_id ?? 0;
         usedNumbers = msg.used_numbers || [];
         maxNumber = msg.state.num_rounds;
         roundTime = msg.state.round_time ?? roundTime;
@@ -118,6 +124,9 @@ function handleMessage(msg) {
         document.getElementById("total-rounds").textContent = msg.state.num_rounds;
         updatePlayerList(msg.state.players, msg.state.scores);
         renderUsedNumbers();
+
+        updateOwnerControls(msg.state.players.length, msg.state.num_players);
+
 
         if (gameStarted) {
             hideWaitingForPlayers();
@@ -138,6 +147,8 @@ function handleMessage(msg) {
 
         updatePlayerList(msg.players, msg.scores);
         gameStarted = msg.game_started;
+        ownerId = msg.owner_id ?? ownerId;
+        updateOwnerControls(msg.players.length, msg.num_players);
 
         if (gameStarted) {
             hideWaitingForPlayers();
@@ -159,6 +170,21 @@ function handleMessage(msg) {
         renderUsedNumbers();
         showNotification(`Time's up! Number ${msg.number} was auto-selected for you.`, "warning");
         setRoundSubtitle("You were auto-picked this round.");
+    }
+
+
+    if (msg.type === "round_reveal_pending") {
+        stopRoundTimer();
+        setRoundSubtitle("All picks are in. Revealing results...");
+
+        const waitingDiv = document.getElementById("waiting-message");
+        if (waitingDiv) {
+            waitingDiv.style.display = "block";
+            waitingDiv.innerHTML = `
+                <div class="loading-dots reveal"><span></span><span></span><span></span></div>
+                <p class="waiting-text">All players locked in. Revealing winner...</p>
+            `;
+        }
     }
 
     if (msg.type === "round_result") {
@@ -402,9 +428,10 @@ function showRoundResults(msg) {
                 .map(([name, choice]) => `<div class="choice-item ${!isDraw && choice === msg.highest ? "winning-choice" : ""}"><span class="choice-name">${name}</span><span class="choice-number">${choice}</span></div>`)
                 .join("")}
         </div>
-        <div class="next-round-timer"><p>Next round in 5 seconds...</p></div>
+        <div class="next-round-timer"><p>Next round begins in <span id="next-round-countdown">5</span>s</p></div>
     `;
     resultsDiv.style.display = "block";
+    startNextRoundCountdown();
 }
 
 function showGameOver(msg) {
@@ -452,4 +479,87 @@ if (roomCodeButton) {
             showNotification("Could not copy room code.", "warning");
         }
     });
+}
+
+
+function startNextRoundCountdown() {
+    if (nextRoundCountdownTimer) clearInterval(nextRoundCountdownTimer);
+
+    let remaining = 5;
+    const el = document.getElementById("next-round-countdown");
+    if (!el) return;
+
+    el.textContent = remaining;
+    nextRoundCountdownTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining >= 1 && el) el.textContent = remaining;
+        if (remaining <= 1) {
+            clearInterval(nextRoundCountdownTimer);
+            nextRoundCountdownTimer = null;
+        }
+    }, 1000);
+}
+
+function updateOwnerControls(currentPlayers, totalPlayers) {
+    const wrap = document.getElementById("owner-controls");
+    if (!wrap) return;
+
+    if (gameStarted) {
+        wrap.style.display = "none";
+        return;
+    }
+
+    const isOwner = Number(playerId) === Number(ownerId);
+    if (!isOwner) {
+        wrap.style.display = "none";
+        return;
+    }
+
+    const allJoined = currentPlayers === totalPlayers;
+    wrap.style.display = "block";
+    wrap.innerHTML = `
+        <div class="owner-start-card">
+            <strong>Host Controls</strong>
+            <p>${allJoined ? "Everyone joined! Start when ready." : `Waiting for players (${currentPlayers}/${totalPlayers})`}</p>
+            <button id="start-game-btn" class="btn btn-primary" ${allJoined ? "" : "disabled"}>Start Game</button>
+        </div>
+    `;
+
+    const btn = document.getElementById("start-game-btn");
+    if (btn) btn.onclick = () => requestGameStart();
+}
+
+function requestGameStart() {
+    fetch("/start_game", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ room_code: roomCode, player_id: playerId })
+    })
+        .then((r) => r.json())
+        .then((d) => {
+            if (d.status !== "ok") {
+                showNotification(d.message || "Could not start game", "error");
+            }
+        })
+        .catch((err) => showNotification(err.message, "error"));
+}
+
+function reconnectStoreKey(room) {
+    return `numberclash:${room}:token`;
+}
+
+function getReconnectToken(room) {
+    try {
+        return localStorage.getItem(reconnectStoreKey(room));
+    } catch {
+        return null;
+    }
+}
+
+function saveReconnectToken(token) {
+    try {
+        localStorage.setItem(reconnectStoreKey(roomCode), token);
+    } catch {
+        // ignore localStorage restrictions
+    }
 }
