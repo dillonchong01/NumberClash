@@ -10,109 +10,123 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="bg-orb orb-a"></div>
-    <div class="bg-orb orb-b"></div>
+    <div class="page-shell">
+        <div id="lobby" class="lobby-screen">
+            <div class="lobby-card">
+                <div class="hero-block">
+                    <p class="hero-kicker">Multiplayer Strategy Game</p>
+                    <h1>Number Clash</h1>
+                    <p class="hero-copy">Outsmart your friends by choosing the highest <strong>unique</strong> number each round.</p>
+                </div>
 
-    <div id="lobby">
-        <div class="lobby-container">
-            <div class="logo">
-                <h1>🎯 Number Clash</h1>
-                <p>Highest unique number wins the round. Use each number once.</p>
-            </div>
+                <div class="tab-buttons">
+                    <button id="btn-create" class="tab-btn active" onclick="showCreateRoom()">Create Room</button>
+                    <button id="btn-join" class="tab-btn" onclick="showJoinRoom()">Join Room</button>
+                </div>
 
-            <div class="tab-buttons">
-                <button id="btn-create" class="tab-btn active" onclick="showCreateRoom()">Create Room</button>
-                <button id="btn-join" class="tab-btn" onclick="showJoinRoom()">Join Room</button>
-            </div>
-
-            <div id="create-room">
-                <form id="create-room-form">
-                    <div class="form-group">
-                        <label for="creator_name">Your Name</label>
-                        <input id="creator_name" type="text" placeholder="Enter your name" maxlength="20" required>
-                    </div>
-                    <div class="form-group two-col">
-                        <div>
-                            <label for="num_players">Players</label>
-                            <select id="num_players" required>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                            </select>
+                <div id="create-room">
+                    <form id="create-room-form" class="stack-form">
+                        <div class="field">
+                            <label for="creator_name">Your Name</label>
+                            <input id="creator_name" type="text" placeholder="Enter your name" maxlength="20" required>
                         </div>
-                        <div>
-                            <label for="round_time">Round Time</label>
-                            <select id="round_time" required>
-                                <option value="5">5s</option>
-                                <option value="10">10s</option>
-                                <option value="15" selected>15s</option>
-                                <option value="20">20s</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="num_rounds">Number of Rounds (5 - 50)</label>
-                        <input id="num_rounds" type="number" min="5" max="50" value="10" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Start New Room</button>
-                </form>
-            </div>
 
-            <div id="join-room" style="display:none;">
-                <form id="join-room-form">
-                    <div class="form-group">
-                        <label for="room_code">Room Code</label>
-                        <input id="room_code" type="text" placeholder="Enter 4-digit code" maxlength="4" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="player_name">Your Name</label>
-                        <input id="player_name" type="text" placeholder="Enter your name" maxlength="20" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Join Match</button>
-                </form>
+                        <div class="grid-2">
+                            <div class="field">
+                                <label for="num_players">Players</label>
+                                <select id="num_players" required>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="round_time">Round Time</label>
+                                <select id="round_time" required>
+                                    <option value="5">5s</option>
+                                    <option value="10">10s</option>
+                                    <option value="15" selected>15s</option>
+                                    <option value="20">20s</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="num_rounds">Rounds (5 - 50)</label>
+                            <input id="num_rounds" type="number" min="5" max="50" value="10" required>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Create New Room</button>
+                    </form>
+                </div>
+
+                <div id="join-room" style="display:none;">
+                    <form id="join-room-form" class="stack-form">
+                        <div class="field">
+                            <label for="room_code">Room Code</label>
+                            <input id="room_code" type="text" placeholder="Enter 4-digit code" maxlength="4" required>
+                        </div>
+                        <div class="field">
+                            <label for="player_name">Your Name</label>
+                            <input id="player_name" type="text" placeholder="Enter your name" maxlength="20" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Join Match</button>
+                    </form>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div id="game-ui" style="display:none;">
-        <div class="container game-grid">
-            <section class="panel main-panel">
-                <header class="match-header">
-                    <div class="room-code-wrap">
-                        <span class="meta-label">Room Code</span>
-                        <button id="room-code-display" class="room-code-value" title="Copy room code">----</button>
+        <div id="game-ui" style="display:none;">
+            <div class="game-shell">
+                <header class="game-top">
+                    <div class="top-left">
+                        <h2>Number Clash</h2>
+                        <p class="muted">Pick fast. Pick smart. Pick unique.</p>
                     </div>
-                    <div class="round-pill">Round <span id="current-round">1</span> / <span id="total-rounds">10</span></div>
+                    <div class="top-right">
+                        <div class="room-code-wrap">
+                            <span class="meta-label">Room</span>
+                            <button id="room-code-display" class="room-code-value" title="Copy room code">----</button>
+                        </div>
+                        <div class="round-pill">Round <span id="current-round">1</span> / <span id="total-rounds">10</span></div>
+                    </div>
                 </header>
 
-                <div class="status-strip">
+                <section class="status-rail">
                     <div id="owner-controls" class="owner-controls" style="display:none;"></div>
                     <div class="timer-container">
+                        <div class="timer-head">
+                            <span>Time Left</span>
+                            <strong id="timer-text">15s remaining</strong>
+                        </div>
                         <div class="timer-bar-bg"><div id="timer-bar" style="width: 100%;"></div></div>
-                        <div id="timer-text">15s remaining</div>
                     </div>
-                    <div class="round-subtitle" id="round-subtitle">Pick your best available number.</div>
-                </div>
+                    <p class="round-subtitle" id="round-subtitle">Pick your best available number.</p>
+                </section>
 
-                <div class="game-area">
-                    <h3>Choose Your Number</h3>
-                    <div id="number-buttons"></div>
-                </div>
-            </section>
+                <div class="game-main-grid">
+                    <section class="play-zone">
+                        <div class="section-head">
+                            <h3>Choose Your Number</h3>
+                        </div>
+                        <div id="number-buttons"></div>
+                    </section>
 
-            <aside class="panel side-panel">
-                <div class="players-section">
-                    <h3>Live Scoreboard</h3>
-                    <div id="players-list"></div>
-                </div>
+                    <aside class="info-zone">
+                        <div class="info-card players-section">
+                            <h3>Scoreboard</h3>
+                            <div id="players-list"></div>
+                        </div>
 
-                <div class="history-section">
-                    <h3>Your Used Numbers</h3>
-                    <div id="used-number-history" class="used-number-history">
-                        <span class="hint">None yet</span>
-                    </div>
+                        <div class="info-card history-section">
+                            <h3>Used Numbers</h3>
+                            <div id="used-number-history" class="used-number-history">
+                                <span class="hint">None yet</span>
+                            </div>
+                        </div>
+                    </aside>
                 </div>
-            </aside>
+            </div>
         </div>
     </div>
 

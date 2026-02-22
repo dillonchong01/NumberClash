@@ -182,7 +182,7 @@ function handleMessage(msg) {
             waitingDiv.style.display = "block";
             waitingDiv.innerHTML = `
                 <div class="loading-dots reveal"><span></span><span></span><span></span></div>
-                <p class="waiting-text">All players locked in. Revealing winner...</p>
+                <p class="waiting-text">Revealing Winner...</p>
             `;
         }
     }
@@ -413,7 +413,7 @@ function showRoundResults(msg) {
 
     const isDraw = msg.is_draw || msg.winners.length === 0;
     const winnerLabel = isDraw ? "Round Draw" : `Round ${msg.current_round} Winner${msg.winners.length > 1 ? "s" : ""}`;
-    const winnerNames = isDraw ? "No unique highest number" : msg.winners.join(", ");
+    const winnerNames = isDraw ? "No Winner" : msg.winners.join(", ");
     setRoundSubtitle(isDraw ? "Draw round — get ready for the next one." : `Round won by ${winnerNames}.`);
 
     resultsDiv.innerHTML = `
